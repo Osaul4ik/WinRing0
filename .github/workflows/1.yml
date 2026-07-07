@@ -1,0 +1,62 @@
+name: Build WinRing0
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: windows-2022
+
+    strategy:
+      matrix:
+        platform: [Win32, x64]
+        configuration: [Release]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Restore NuGet packages (if any)
+        run: nuget restore WinRing0.sln
+        continue-on-error: true
+
+      - name: Build solution
+        run: >
+          msbuild WinRing0.sln
+          /p:Configuration=${{ matrix.configuration }}
+          /p:Platform=${{ matrix.platform }}
+          /m
+          /verbosity:minimal
+
+      - name: Locate build outputs
+        id: locate
+        shell: pwsh
+        run: |
+          $outDir = "artifacts/${{ matrix.platform }}"
+          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+
+          $patterns = @("*.dll", "*.sys", "*.vxd", "*.lib", "*.exe", "*.pdb")
+          foreach ($p in $patterns) {
+            Get-ChildItem -Recurse -Include $p -Path . -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match "\\(Release|Debug)\\" } |
+              Copy-Item -Destination $outDir -Force
+          }
+
+          Get-ChildItem $outDir
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: WinRing0-${{ matrix.platform }}-${{ matrix.configuration }}
+          path: artifacts/${{ matrix.platform }}/*
+          if-no-files-found: warn
+          retention-days: 30
