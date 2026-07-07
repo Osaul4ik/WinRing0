@@ -25,6 +25,31 @@ jobs:
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
 
+      - name: Check if WDK headers already present
+        id: wdk_check
+        shell: pwsh
+        run: |
+          $sdkRoot = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\Include'
+          $found = Get-ChildItem $sdkRoot -Directory -ErrorAction SilentlyContinue |
+            ForEach-Object { Test-Path (Join-Path $_.FullName 'km\ntddk.h') } |
+            Where-Object { $_ -eq $true }
+          $present = [bool]$found
+          "present=$present" >> $env:GITHUB_OUTPUT
+          Write-Host "WDK km headers present: $present"
+
+      - name: Install Windows Driver Kit (WDK)
+        if: steps.wdk_check.outputs.present != 'true'
+        shell: pwsh
+        run: |
+          choco install windowsdriverkit10 -y --no-progress
+          $vsixPath = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Vsix" -Recurse -Filter "WDK.vsix" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($vsixPath) {
+            $vsInstaller = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\resources\app\ServiceHub\Services\Microsoft.VisualStudio.Setup.Service\VSIXInstaller.exe"
+            & $vsInstaller /q /a $vsixPath.FullName
+          } else {
+            Write-Warning "WDK.vsix not found after install; MSBuild may still be missing WDK targets."
+          }
+
       - name: Restore NuGet packages (if any)
         run: nuget restore WinRing0.sln
         continue-on-error: true
